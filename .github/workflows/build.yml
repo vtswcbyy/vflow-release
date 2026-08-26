@@ -1,0 +1,493 @@
+name: Build & Release App
+
+# ────────────────────────────────────────────────────────────
+#  触发条件:
+#    - 手动触发 (workflow_dispatch): 仅仓库所有者/写权限者可触发
+#    - 远程触发 (repository_dispatch): 仅携带有效 Secret Token 的请求可触发
+#    - 严格杜绝 PR (绝无 pull_request 监听，外部 PR 无法运行任何构建)
+# ────────────────────────────────────────────────────────────
+on:
+  workflow_dispatch:
+    inputs:
+      private_repo:
+        description: '私有代码库 (格式: owner/repo)'
+        required: true
+        default: 'vtswcbyy/vcash'
+        type: string
+      git_ref:
+        description: '构建的分支 / Tag / Commit SHA (如 main 或 v0.1.0)'
+        required: true
+        default: 'main'
+        type: string
+      platform:
+        description: '目标构建平台'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - linux
+          - macos
+      engine_repo:
+        description: '预编译底层引擎所在 Release 仓库 (owner/repo)'
+        required: false
+        default: 'vtswcbyy/vflow-release'
+        type: string
+      engine_tag:
+        description: '预编译底层引擎 Release Tag (如 v0.1.0 或留空拉取最新)'
+        required: false
+        default: ''
+        type: string
+      create_release:
+        description: '是否发布到 GitHub Release'
+        required: false
+        default: true
+        type: boolean
+      release_tag:
+        description: 'Release Tag 版本号 (例如 v0.1.0，为空则使用 git_ref)'
+        required: false
+        default: ''
+        type: string
+
+  repository_dispatch:
+    types: [trigger-release-build]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: stable
+
+jobs:
+  # ══════════════════════════════════════════════════════════
+  #  1. Windows 构建 (x86_64 MSVC — CUDA + Vulkan)
+  # ══════════════════════════════════════════════════════════
+  build-windows:
+    name: "Windows (x86_64, CUDA + Vulkan)"
+    if: |
+      github.event_name == 'repository_dispatch' ||
+      inputs.platform == 'windows' ||
+      inputs.platform == 'all'
+    runs-on: windows-2022
+
+    steps:
+      - name: Print Windows Hardware & System Diagnostic Info
+        shell: pwsh
+        run: |
+          Write-Host "================================================================================" -ForegroundColor Cyan
+          Write-Host "🖥️  [Windows 构建机系统与硬件环境诊断]" -ForegroundColor Cyan
+          Write-Host "--------------------------------------------------------------------------------"
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Host ("📌 操作系统: " + $os.Caption + " (" + $os.Version + ", Build " + $os.BuildNumber + ") [Arch: " + $os.OSArchitecture + "]")
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          Write-Host ("🧠 CPU 处理器: " + $cpu.Name.Trim() + " [核心数: " + $cpu.NumberOfCores + ", 逻辑线程数: " + $cpu.NumberOfLogicalProcessors + "]")
+          $cs = Get-CimInstance Win32_ComputerSystem
+          $memGB = [math]::Round($cs.TotalPhysicalMemory / 1GB, 2)
+          $freeMemGB = [math]::Round($os.FreePhysicalMemory / 1MB, 2)
+          Write-Host ("💾 物理内存: 总计 " + $memGB + " GB (当前可用: " + $freeMemGB + " GB)")
+          Write-Host "💽 磁盘驱动器空间列表:"
+          Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{Name="Total(GB)";Expression={[math]::Round(($_.Used + $_.Free)/1GB,2)}}, @{Name="Used(GB)";Expression={[math]::Round($_.Used/1GB,2)}}, @{Name="Free(GB)";Expression={[math]::Round($_.Free/1GB,2)}} | Format-Table -AutoSize
+          Write-Host "================================================================================" -ForegroundColor Cyan
+
+      - name: Checkout Private Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.private_repo || inputs.private_repo }}
+          ref: ${{ github.event.client_payload.git_ref || inputs.git_ref }}
+          token: ${{ secrets.PRIVATE_REPO_VCASH_TOKEN }}
+          submodules: recursive
+
+      - name: Download Precompiled Engines (qwentts & sdcpp for Windows)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_VCASH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "================================================================================"
+          echo "📥 [下载 Windows 预编译底层引擎库] (CUDA 12.x + Vulkan)"
+          echo "--------------------------------------------------------------------------------"
+          ENG_REPO="${{ github.event.client_payload.engine_repo || inputs.engine_repo || 'vtswcbyy/vflow-release' }}"
+          ENG_TAG="${{ github.event.client_payload.engine_tag || inputs.engine_tag }}"
+          
+          TARGET_DIR="backends/x86_64-pc-windows-msvc"
+          mkdir -p "$TARGET_DIR"
+
+          TAG_FLAG=""
+          if [ -n "$ENG_TAG" ]; then
+            TAG_FLAG="--tag $ENG_TAG"
+          fi
+
+          echo "🔍 正在从 $ENG_REPO (Release: ${ENG_TAG:-latest}) 拉取 Windows 预编译引擎包..."
+          gh release download $TAG_FLAG --repo "$ENG_REPO" --pattern "*windows-x86_64*" --dir "$TARGET_DIR" || {
+            echo "⚠️ [提示] 未能从 Release 直接下载到预编译包或无需重复下载，继续执行..."
+          }
+
+          cd "$TARGET_DIR"
+          for f in *.tar.gz; do
+            if [ -f "$f" ]; then
+              echo "📦 正在解压: $f"
+              tar -xzf "$f"
+              rm -f "$f"
+            fi
+          done
+          for f in *.zip; do
+            if [ -f "$f" ]; then
+              echo "📦 正在解压: $f"
+              unzip -o -q "$f"
+              rm -f "$f"
+            fi
+          done
+          cd - > /dev/null
+
+          echo "✅ [预编译引擎目录结构状态]:"
+          ls -la "$TARGET_DIR"
+          echo "================================================================================"
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Cache Cargo & Build Artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tmp_build
+            target
+          key: windows-build-v2-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            windows-build-v2-${{ hashFiles('**/Cargo.lock') }}-
+            windows-build-v2-
+
+      - name: Build & Package Windows Release
+        shell: bash
+        run: |
+          # 执行项目自身的 Windows 打包脚本（由于已放入预编译库，将自动秒级跳过 CMake 编译）
+          bash ./package_win.sh package
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            dist/**/*.zip
+            dist/**/*.tar.gz
+            dist/**/manifest.json
+            *-windows-x86_64.zip
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ══════════════════════════════════════════════════════════
+  #  2. Linux 构建 (Ubuntu 20.04 glibc 2.31 — CUDA + Vulkan)
+  # ══════════════════════════════════════════════════════════
+  build-linux:
+    name: "Linux (Ubuntu 20.04, CUDA + Vulkan)"
+    if: |
+      github.event_name == 'repository_dispatch' ||
+      inputs.platform == 'linux' ||
+      inputs.platform == 'all'
+    runs-on: ubuntu-22.04
+    container:
+      image: ubuntu:20.04
+      options: --privileged
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Print Linux Diagnostic Info
+        run: |
+          echo "================================================================================"
+          echo "🖥️  [Linux 构建机系统与硬件环境诊断]"
+          echo "--------------------------------------------------------------------------------"
+          echo "📌 操作系统: $(uname -s -r -m)"
+          [ -f /etc/os-release ] && grep -E '^(PRETTY_NAME|NAME|VERSION)=' /etc/os-release || true
+          echo "🧠 CPU 处理器: $(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs || echo 'N/A') [核心数: $(nproc 2>/dev/null || echo 1)]"
+          echo "💾 物理内存: $(free -h 2>/dev/null | awk '/^Mem:/{print "总计: "$2", 已用: "$3", 可用: "$7}' || echo 'N/A')"
+          df -h -x tmpfs -x devtmpfs -x overlay 2>/dev/null || df -h
+          echo "================================================================================"
+
+      - name: Install System Base Dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            software-properties-common curl wget git pkg-config ccache \
+            libasound2-dev tar gzip xz-utils ca-certificates gnupg build-essential unzip
+          # 安装 GitHub CLI (gh) 用于安全下载 release 产物
+          type -p curl >/dev/null || apt-get install curl -y
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          apt-get update
+          apt-get install gh -y || true
+
+      - name: Checkout Private Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.private_repo || inputs.private_repo }}
+          ref: ${{ github.event.client_payload.git_ref || inputs.git_ref }}
+          token: ${{ secrets.PRIVATE_REPO_VCASH_TOKEN }}
+          submodules: recursive
+
+      - name: Download Precompiled Engines (qwentts & sdcpp for Linux)
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_VCASH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "================================================================================"
+          echo "📥 [下载 Linux 预编译底层引擎库] (CUDA 12.x + Vulkan)"
+          echo "--------------------------------------------------------------------------------"
+          ENG_REPO="${{ github.event.client_payload.engine_repo || inputs.engine_repo || 'vtswcbyy/vflow-release' }}"
+          ENG_TAG="${{ github.event.client_payload.engine_tag || inputs.engine_tag }}"
+          
+          TARGET_DIR="backends/x86_64-unknown-linux-gnu"
+          mkdir -p "$TARGET_DIR"
+
+          TAG_FLAG=""
+          if [ -n "$ENG_TAG" ]; then
+            TAG_FLAG="--tag $ENG_TAG"
+          fi
+
+          echo "🔍 正在从 $ENG_REPO (Release: ${ENG_TAG:-latest}) 拉取 Linux 预编译引擎包..."
+          gh release download $TAG_FLAG --repo "$ENG_REPO" --pattern "*linux-x86_64*" --dir "$TARGET_DIR" || {
+            echo "⚠️ [提示] 未能从 Release 直接下载到预编译包或无需重复下载，继续执行..."
+          }
+
+          cd "$TARGET_DIR"
+          for f in *.tar.gz; do
+            if [ -f "$f" ]; then
+              echo "📦 正在解压: $f"
+              tar -xzf "$f"
+              rm -f "$f"
+            fi
+          done
+          for f in *.zip; do
+            if [ -f "$f" ]; then
+              echo "📦 正在解压: $f"
+              unzip -o -q "$f"
+              rm -f "$f"
+            fi
+          done
+          cd - > /dev/null
+
+          echo "✅ [预编译引擎目录结构状态]:"
+          ls -la "$TARGET_DIR"
+          echo "================================================================================"
+
+      - name: Cache Cargo & Build Artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.ccache
+            tmp_build
+            target
+          key: linux-build-v2-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            linux-build-v2-${{ hashFiles('**/Cargo.lock') }}-
+            linux-build-v2-
+
+      - name: Build & Package Linux Release
+        run: |
+          # package_linux.sh 会自动自愈安装环境并执行打包
+          bash ./package_linux.sh package
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            dist/**/*.tar.gz
+            dist/**/*.zip
+            dist/**/manifest.json
+            *-linux-x86_64.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ══════════════════════════════════════════════════════════
+  #  3. macOS 构建 (Apple Silicon ARM64 — Metal 加速)
+  # ══════════════════════════════════════════════════════════
+  build-macos:
+    name: "macOS (Apple Silicon ARM64, Metal)"
+    if: |
+      github.event_name == 'repository_dispatch' ||
+      inputs.platform == 'macos' ||
+      inputs.platform == 'all'
+    runs-on: macos-14
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Print macOS Hardware & System Diagnostic Info
+        run: |
+          echo "================================================================================"
+          echo "🖥️  [macOS Apple Silicon 构建机环境诊断]"
+          echo "--------------------------------------------------------------------------------"
+          echo "📌 操作系统: $(sw_vers -productName) $(sw_vers -productVersion) (Build $(sw_vers -buildVersion)) [Arch: $(uname -m)]"
+          echo "🧠 CPU 处理器: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || sysctl -n hw.model) [逻辑核心: $(sysctl -n hw.ncpu)]"
+          echo "💾 物理内存: $(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024)) GB"
+          echo "💽 磁盘空间:"
+          df -h /
+          echo "================================================================================"
+
+      - name: Checkout Private Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.private_repo || inputs.private_repo }}
+          ref: ${{ github.event.client_payload.git_ref || inputs.git_ref }}
+          token: ${{ secrets.PRIVATE_REPO_VCASH_TOKEN }}
+          submodules: recursive
+
+      - name: Download Precompiled Engines (qwentts & sdcpp for macOS Metal)
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_VCASH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "================================================================================"
+          echo "📥 [下载 macOS 预编译底层引擎库] (Apple Silicon ARM64 Metal)"
+          echo "--------------------------------------------------------------------------------"
+          ENG_REPO="${{ github.event.client_payload.engine_repo || inputs.engine_repo || 'vtswcbyy/vflow-release' }}"
+          ENG_TAG="${{ github.event.client_payload.engine_tag || inputs.engine_tag }}"
+          
+          TARGET_DIR="backends/aarch64-apple-darwin"
+          mkdir -p "$TARGET_DIR"
+
+          TAG_FLAG=""
+          if [ -n "$ENG_TAG" ]; then
+            TAG_FLAG="--tag $ENG_TAG"
+          fi
+
+          echo "🔍 正在从 $ENG_REPO (Release: ${ENG_TAG:-latest}) 拉取 macOS ARM64 预编译引擎包..."
+          gh release download $TAG_FLAG --repo "$ENG_REPO" --pattern "*macos-arm64*" --dir "$TARGET_DIR" || {
+            echo "⚠️ [提示] 未能从 Release 直接下载到预编译包或无需重复下载，继续执行..."
+          }
+
+          cd "$TARGET_DIR"
+          for f in *.tar.gz; do
+            if [ -f "$f" ]; then
+              echo "📦 正在解压: $f"
+              tar -xzf "$f"
+              rm -f "$f"
+            fi
+          done
+          for f in *.zip; do
+            if [ -f "$f" ]; then
+              echo "📦 正在解压: $f"
+              unzip -o -q "$f"
+              rm -f "$f"
+            fi
+          done
+          cd - > /dev/null
+
+          echo "✅ [预编译引擎目录结构状态]:"
+          ls -la "$TARGET_DIR"
+          echo "================================================================================"
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-apple-darwin
+
+      - name: Cache Cargo & Build Artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            tmp_build
+            target
+          key: macos-build-v2-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            macos-build-v2-${{ hashFiles('**/Cargo.lock') }}-
+            macos-build-v2-
+
+      - name: Build & Package macOS Release
+        run: |
+          # package_mac.sh 会自动执行前端混淆并完成 macOS 安装包打包
+          bash ./package_mac.sh package
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: |
+            dist/**/*.tar.gz
+            dist/**/*.zip
+            dist/**/manifest.json
+            *-macos-arm64.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ══════════════════════════════════════════════════════════
+  #  4. 发布 GitHub Release (自动挂载到当前公开仓库)
+  # ══════════════════════════════════════════════════════════
+  publish-release:
+    name: "Publish GitHub Release"
+    needs: [build-windows, build-linux, build-macos]
+    if: |
+      always() &&
+      (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') &&
+      (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped') &&
+      (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') &&
+      (
+        github.event_name == 'repository_dispatch' ||
+        inputs.create_release == true
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Calculate Release Tag Name
+        id: get_tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.client_payload.release_tag || inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${{ github.event.client_payload.git_ref || inputs.git_ref }}"
+          fi
+          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+          echo "🔖 Release Tag: $TAG"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets/
+
+      - name: List and Prepare Release Assets
+        shell: bash
+        run: |
+          mkdir -p dist/
+          find release_assets/ -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "manifest.json" \) -exec cp {} dist/ \;
+          echo "📦 准备发布的最终文件清单:"
+          ls -la dist/
+
+      - name: Create Public GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag_name }}
+          name: "Release ${{ steps.get_tag.outputs.tag_name }}"
+          draft: false
+          prerelease: ${{ contains(steps.get_tag.outputs.tag_name, 'alpha') || contains(steps.get_tag.outputs.tag_name, 'beta') || contains(steps.get_tag.outputs.tag_name, 'rc') }}
+          body: |
+            ## 📦 Release ${{ steps.get_tag.outputs.tag_name }}
+
+            ### 🚀 安装包下载
+
+            | 平台 | 文件名 | 加速支持 |
+            |------|--------|----------|
+            | 🍏 macOS (ARM64 / Apple Silicon) | `*-macos-arm64.tar.gz` | Apple Metal 原生 GPU 加速 |
+            | 🪟 Windows (x86_64) | `*-windows-x86_64.zip` | CUDA 12.x + Vulkan |
+            | 🐧 Linux (x86_64, glibc 2.31+) | `*-linux-x86_64.tar.gz` | CUDA 12.x + Vulkan |
+
+            ### 💡 运行要求
+            - **macOS**: macOS 12.0+ (Apple Silicon M1/M2/M3/M4 系列)，已内置原生 Metal 加速。
+            - **CUDA 模式**: NVIDIA 驱动 ≥ 525（推荐 550+），免安装 CUDA Toolkit。
+            - **Vulkan 模式**: 支持 Vulkan 1.2+ 的主流显卡（NVIDIA / AMD / Intel Arc / 核显）。
+          files: |
+            dist/**/*.tar.gz
+            dist/**/*.zip
+            dist/**/manifest.json
