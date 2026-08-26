@@ -49,10 +49,71 @@ env:
 
 jobs:
   # ══════════════════════════════════════════════════════════
+  #  0. 版本号有效性与重复 Release 熔断预检 (耗时 ~5 秒)
+  # ══════════════════════════════════════════════════════════
+  precheck:
+    name: "Pre-check & Version Conflict Check"
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.check_version.outputs.release_tag }}
+    steps:
+      - name: Checkout Private Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.private_repo || inputs.private_repo }}
+          ref: ${{ github.event.client_payload.git_ref || inputs.git_ref }}
+          token: ${{ secrets.PRIVATE_REPO_VCASH_TOKEN }}
+
+      - name: Check Version & Detect Duplicate Release
+        id: check_version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "================================================================================"
+          echo "🔍 [前置预检] 版本号解析与已有 Release 重复冲突检查"
+          echo "--------------------------------------------------------------------------------"
+          
+          # 1. 解析目标版本号
+          TAG="${{ github.event.client_payload.release_tag || inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            PKG_VER=$(grep -m1 '^version =' Cargo.toml | cut -d '"' -f 2)
+            TAG="v${PKG_VER}"
+          fi
+          
+          echo "📌 本次构建解析目标版本: $TAG"
+          
+          DO_RELEASE="${{ github.event.client_payload.create_release || inputs.create_release }}"
+          if [ -z "$DO_RELEASE" ]; then
+            DO_RELEASE="true"
+          fi
+          
+          # 2. 检查公开仓库是否已存在同名 Release
+          if [ "$DO_RELEASE" = "true" ]; then
+            echo "🔍 正在检查公开仓库是否已有已发布的同名 Release: $TAG ..."
+            if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              echo "================================================================================"
+              echo "❌ ❌ ❌ [构建熔断拦截: 版本号已存在] ❌ ❌ ❌"
+              echo "--------------------------------------------------------------------------------"
+              echo "⚠️  公开仓库 ${{ github.repository }} 中已存在同名 Release: $TAG ！"
+              echo "💡 常见原因: 忘记在本地 Cargo.toml 中递增版本号 (当前仍为 $TAG)"
+              echo "👉 解决方法:"
+              echo "   1. 请在本地修改 Cargo.toml 中的 version (例如升级到新版本)，提交推送后重新构建；"
+              echo "   2. 或者在 Run workflow 触发弹窗中手动填写一个不同的 release_tag。"
+              echo "================================================================================"
+              exit 1
+            fi
+            echo "✅ 版本号 $TAG 校验通过，无重复历史 Release，允许开始编译！"
+          fi
+          
+          echo "release_tag=$TAG" >> $GITHUB_OUTPUT
+          echo "================================================================================"
+
+  # ══════════════════════════════════════════════════════════
   #  1. Windows 构建 (x86_64 MSVC — CUDA + Vulkan)
   # ══════════════════════════════════════════════════════════
   build-windows:
     name: "Windows (x86_64, CUDA + Vulkan)"
+    needs: [precheck]
     if: |
       github.event_name == 'repository_dispatch' ||
       inputs.platform == 'windows' ||
@@ -95,7 +156,6 @@ jobs:
           echo "📥 [自动下载 Windows 预编译底层引擎库] (CUDA 12.x + Vulkan)"
           echo "--------------------------------------------------------------------------------"
           
-          # 1. 动态从 Cargo.toml 解析主项目版本号
           PKG_VER=$(grep -m1 '^version =' Cargo.toml | cut -d '"' -f 2)
           MAIN_TAG="v${PKG_VER}"
           BASE_TAG="v$(echo "$PKG_VER" | cut -d. -f1,2).0"
@@ -104,7 +164,6 @@ jobs:
           TARGET_DIR="backends/x86_64-pc-windows-msvc"
           mkdir -p "$TARGET_DIR"
 
-          # 2. 从 vtswcbyy/qwentts.cpp 下载
           echo "🔍 正在从 vtswcbyy/qwentts.cpp 拉取 Windows 预编译引擎包..."
           gh release download "$MAIN_TAG" --repo "vtswcbyy/qwentts.cpp" --pattern "*windows-x86_64*" --dir "$TARGET_DIR" 2>/dev/null || \
           gh release download "$BASE_TAG" --repo "vtswcbyy/qwentts.cpp" --pattern "*windows-x86_64*" --dir "$TARGET_DIR" 2>/dev/null || \
@@ -112,7 +171,6 @@ jobs:
             echo "⚠️ [提示] 未能从 qwentts.cpp 获取到预编译包，将按需自愈编译或复用已有文件"
           }
 
-          # 3. 从 vtswcbyy/stable-diffusion.cpp 下载
           echo "🔍 正在从 vtswcbyy/stable-diffusion.cpp 拉取 Windows 预编译引擎包..."
           gh release download "$MAIN_TAG" --repo "vtswcbyy/stable-diffusion.cpp" --pattern "*windows-x86_64*" --dir "$TARGET_DIR" 2>/dev/null || \
           gh release download "$BASE_TAG" --repo "vtswcbyy/stable-diffusion.cpp" --pattern "*windows-x86_64*" --dir "$TARGET_DIR" 2>/dev/null || \
@@ -120,7 +178,6 @@ jobs:
             echo "⚠️ [提示] 未能从 stable-diffusion.cpp 获取到预编译包，将按需自愈编译或复用已有文件"
           }
 
-          # 4. 解压并清理压缩包
           cd "$TARGET_DIR"
           for f in *.tar.gz; do
             if [ -f "$f" ]; then
@@ -183,6 +240,7 @@ jobs:
   # ══════════════════════════════════════════════════════════
   build-linux:
     name: "Linux (Ubuntu 20.04, CUDA + Vulkan)"
+    needs: [precheck]
     if: |
       github.event_name == 'repository_dispatch' ||
       inputs.platform == 'linux' ||
@@ -318,6 +376,7 @@ jobs:
   # ══════════════════════════════════════════════════════════
   build-macos:
     name: "macOS (Apple Silicon ARM64, Metal)"
+    needs: [precheck]
     if: |
       github.event_name == 'repository_dispatch' ||
       inputs.platform == 'macos' ||
@@ -441,9 +500,10 @@ jobs:
   # ══════════════════════════════════════════════════════════
   publish-release:
     name: "Publish GitHub Release"
-    needs: [build-windows, build-linux, build-macos]
+    needs: [precheck, build-windows, build-linux, build-macos]
     if: |
       always() &&
+      needs.precheck.result == 'success' &&
       (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') &&
       (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped') &&
       (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') &&
@@ -469,38 +529,15 @@ jobs:
           echo "📦 准备发布的最终文件清单:"
           ls -la dist/
 
-      - name: Calculate Release Tag Name
-        id: get_tag
-        shell: bash
-        run: |
-          # 1. 优先使用手动指定的 release_tag
-          TAG="${{ github.event.client_payload.release_tag || inputs.release_tag }}"
-          
-          # 2. 若留空，从打包出的产物文件名中自动提取版本号 (如 vflow-v0.1.0-windows-x86_64.zip -> v0.1.0)
-          if [ -z "$TAG" ]; then
-            PKG_FILE=$(find dist/ -type f \( -name "*.zip" -o -name "*.tar.gz" \) | head -n 1)
-            if [ -n "$PKG_FILE" ]; then
-              TAG=$(echo "$PKG_FILE" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
-            fi
-          fi
-
-          # 3. 兜底回退：若未匹配到则使用 git_ref
-          if [ -z "$TAG" ]; then
-            TAG="${{ github.event.client_payload.git_ref || inputs.git_ref }}"
-          fi
-
-          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
-          echo "🔖 最终生成的 GitHub Release Tag: $TAG"
-
       - name: Create Public GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_tag.outputs.tag_name }}
-          name: "Release ${{ steps.get_tag.outputs.tag_name }}"
+          tag_name: ${{ needs.precheck.outputs.release_tag }}
+          name: "Release ${{ needs.precheck.outputs.release_tag }}"
           draft: false
-          prerelease: ${{ contains(steps.get_tag.outputs.tag_name, 'alpha') || contains(steps.get_tag.outputs.tag_name, 'beta') || contains(steps.get_tag.outputs.tag_name, 'rc') }}
+          prerelease: ${{ contains(needs.precheck.outputs.release_tag, 'alpha') || contains(needs.precheck.outputs.release_tag, 'beta') || contains(needs.precheck.outputs.release_tag, 'rc') }}
           body: |
-            ## 📦 Release ${{ steps.get_tag.outputs.tag_name }}
+            ## 📦 Release ${{ needs.precheck.outputs.release_tag }}
 
             ### 🚀 安装包下载
 
