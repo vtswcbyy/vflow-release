@@ -36,11 +36,11 @@
 
 前往页面右侧的 [**Releases 发布页面**](https://github.com/vtswcbyy/vflow-release/releases) 下载适合你电脑系统的安装包：
 
-| 电脑系统 | 适合机型 | 加速类型 | 下载文件名 |
+| 操作系统 | 适合机型 | 加速类型 | 下载文件名 |
 | :--- | :--- | :--- | :--- |
-| **Windows 电脑** | 常见台式机 / 笔记本 (64位) | 支持 N卡 CUDA 加速 + 通用显卡加速 | `vflow-v*-windows-x86_64.zip` |
-| **苹果 Mac 电脑** | 搭载 M1 / M2 / M3 / M4 芯片的 Mac | 原生 Apple Metal 芯片加速 | `vflow-v*-macos-arm64.tar.gz` |
-| **Linux 电脑** | Ubuntu / Debian 等主流 64位系统 | CUDA + Vulkan 硬件加速 | `vflow-v*-linux-x86_64.tar.gz` |
+| **Windows** | 常见台式机 / 笔记本 (64位) | 支持 N卡 CUDA 加速 + 通用显卡加速 | `vflow-v*-windows-x86_64.zip` |
+| **苹果Mac** | 搭载 M1 / M2 / M3 / M4 芯片的 Mac | 原生 Apple Metal 芯片加速 | `vflow-v*-macos-arm64.tar.gz` |
+| **Linux** | Ubuntu / Debian 等主流 64位系统 | CUDA + Vulkan 硬件加速 | `vflow-v*-linux-x86_64.tar.gz` |
 
 > 💡 **下载小提示**：国内访问 GitHub 如遇下载较慢，可配合使用下载工具或网络加速。后续版本将同步上线 Hugging Face 与 魔搭 (ModelScope) 高速国内下载镜像。
 
