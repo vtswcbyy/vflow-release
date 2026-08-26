@@ -15,9 +15,9 @@ on:
         default: 'vtswcbyy/vcash'
         type: string
       git_ref:
-        description: '构建的分支 / Tag / Commit SHA (如 main 或 v0.1.0)'
+        description: '构建的分支 / Tag / Commit SHA (如 master 或 v0.1.0)'
         required: true
-        default: 'main'
+        default: 'master'
         type: string
       platform:
         description: '目标构建平台'
