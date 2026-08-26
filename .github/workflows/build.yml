@@ -585,12 +585,15 @@ jobs:
       - name: List and Prepare Release Assets
         shell: bash
         run: |
-          mkdir -p dist/latest/
-          # 还原各平台分发包目录结构至 dist/latest/
-          cp -r release_assets/* dist/ 2>/dev/null || true
-          cp -r release_assets/windows-release/* dist/latest/ 2>/dev/null || true
-          cp -r release_assets/linux-release/* dist/latest/ 2>/dev/null || true
-          cp -r release_assets/macos-release/* dist/latest/ 2>/dev/null || true
+          mkdir -p dist/latest/packages/
+          # 规范提取 manifest.json 与各平台启动器至 dist/latest/ 根目录
+          find release_assets/ -type f -name "manifest.json" -exec cp -f {} dist/latest/ \;
+          find release_assets/ -type f \( -name "launcher*" -o -name "*.exe" \) -exec cp -f {} dist/latest/ \;
+
+          # 规范合并所有平台的 packages 子包
+          for pdir in $(find release_assets/ -type d -name "packages"); do
+            cp -rf "$pdir/"* dist/latest/packages/ 2>/dev/null || true
+          done
 
           # 准备 GitHub Release 扁平化分发文件清单
           mkdir -p release_dist/
@@ -602,8 +605,11 @@ jobs:
             -name "*.tar.zst" -o \
             -name "manifest.json" \
           \) -exec cp {} release_dist/ \;
-          echo "📦 准备挂载到 GitHub Release 的清单:"
-          ls -lh release_dist/
+
+          echo "📦 整理完毕的 dist/latest 结构:"
+          ls -la dist/latest/
+          echo "📦 整理完毕的 packages 结构:"
+          ls -la dist/latest/packages/
 
       - name: Create Public GitHub Release
         uses: softprops/action-gh-release@v2
@@ -656,20 +662,35 @@ jobs:
           mkdir -p "$SYNC_DIR"
           cd "$SYNC_DIR"
 
-          git init -b main
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 优先浅克隆拉取远端已有的历史版本目录 (例如已存在的 v0.1.0/ 等)，实现多版本共存
+          CLONED=0
+          if [ -n "$HF_TOKEN" ]; then
+            git clone --depth 1 "https://user:${HF_TOKEN}@huggingface.co/datasets/${HF_REPO}" . 2>/dev/null && CLONED=1 || true
+          fi
+          if [ "$CLONED" -eq 0 ] && [ -n "$MODELSCOPE_TOKEN" ]; then
+            git clone --depth 1 "https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/datasets/${MS_REPO}.git" . 2>/dev/null && CLONED=1 || true
+          fi
+
+          if [ ! -d ".git" ]; then
+            git init -b main
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+          fi
+
           git lfs install --local
-          git lfs track "*.tar.zst" "*.exe" "*.bin" "*.onnx" "*.gguf" "*.safetensors" "*.dll"
+          # 关键：追踪所有二进制文件（包含无后缀的 Linux/macOS launcher）
+          git lfs track "launcher*" "*.exe" "*.tar.zst" "*.bin" "*.onnx" "*.gguf" "*.safetensors" "*.dll" "*.dylib" "*.so*"
           git config lfs.concurrenttransfers 8
 
           echo "📋 正在组织目录级多版本隔离结构..."
           mkdir -p latest "$RELEASE_TAG"
 
-          # 填充 latest 目录 (供客户端默认请求)
+          # 刷新 latest 目录为本次构建最新文件
+          rm -rf latest/*
           cp -r ../dist/latest/* latest/ 2>/dev/null || true
 
-          # 填充专属版本目录 (永久快照保留，永不覆盖)
+          # 写入本次专属版本目录 (永久快照保留，历史版本不受影响)
+          rm -rf "${RELEASE_TAG}"/*
           cp -r ../dist/latest/* "$RELEASE_TAG"/ 2>/dev/null || true
 
           echo ".git_release" > .gitignore
@@ -689,7 +710,7 @@ jobs:
           if [ -n "$HF_TOKEN" ]; then
             echo "☁️  [Hugging Face] 配置远程目标: https://huggingface.co/datasets/${HF_REPO}"
             git remote add origin-hf "https://user:${HF_TOKEN}@huggingface.co/datasets/${HF_REPO}"
-            echo "🚀 [Hugging Face] 后台并发推送中..."
+            echo "🚀 [Hugging Face] 后台并发推送 main 分支中..."
             git push -u origin-hf main --force &
             PIDS+=($!)
             NAMES+=("Hugging Face")
@@ -698,8 +719,9 @@ jobs:
           if [ -n "$MODELSCOPE_TOKEN" ]; then
             echo "☁️  [ModelScope 魔塔] 配置远程目标: https://www.modelscope.cn/datasets/${MS_REPO}.git"
             git remote add origin-ms "https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/datasets/${MS_REPO}.git"
-            echo "🚀 [ModelScope 魔塔] 后台并发推送中..."
-            git push -u origin-ms main --force &
+            echo "🚀 [ModelScope 魔塔] 后台并发推送 master & main 分支中..."
+            # 魔塔默认分支为 master，同时推送 master 和 main 确保网页和 API 双端秒级可见
+            (git push -u origin-ms main:master --force && git push origin-ms main --force 2>/dev/null || true) &
             PIDS+=($!)
             NAMES+=("ModelScope 魔塔")
           fi
