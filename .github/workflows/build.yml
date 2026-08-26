@@ -279,9 +279,13 @@ jobs:
         with:
           name: windows-release
           path: |
+            dist/latest/launcher*.exe
+            dist/latest/manifest.json
+            dist/latest/packages/
             dist/**/*.zip
             dist/**/*.tar.gz
-            dist/**/manifest.json
+            dist/**/*.tar.zst
+            dist/**/*.exe
             *-windows-x86_64.zip
           if-no-files-found: warn
           retention-days: 7
@@ -415,9 +419,12 @@ jobs:
         with:
           name: linux-release
           path: |
+            dist/latest/launcher*
+            dist/latest/manifest.json
+            dist/latest/packages/
             dist/**/*.tar.gz
             dist/**/*.zip
-            dist/**/manifest.json
+            dist/**/*.tar.zst
             *-linux-x86_64.tar.gz
           if-no-files-found: warn
           retention-days: 7
@@ -539,9 +546,12 @@ jobs:
         with:
           name: macos-release
           path: |
+            dist/latest/launcher*
+            dist/latest/manifest.json
+            dist/latest/packages/
             dist/**/*.tar.gz
             dist/**/*.zip
-            dist/**/manifest.json
+            dist/**/*.tar.zst
             *-macos-arm64.tar.gz
           if-no-files-found: warn
           retention-days: 7
@@ -575,10 +585,25 @@ jobs:
       - name: List and Prepare Release Assets
         shell: bash
         run: |
-          mkdir -p dist/
-          find release_assets/ -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "manifest.json" \) -exec cp {} dist/ \;
-          echo "📦 准备发布的最终文件清单:"
-          ls -la dist/
+          mkdir -p dist/latest/
+          # 还原各平台分发包目录结构至 dist/latest/
+          cp -r release_assets/* dist/ 2>/dev/null || true
+          cp -r release_assets/windows-release/* dist/latest/ 2>/dev/null || true
+          cp -r release_assets/linux-release/* dist/latest/ 2>/dev/null || true
+          cp -r release_assets/macos-release/* dist/latest/ 2>/dev/null || true
+
+          # 准备 GitHub Release 扁平化分发文件清单
+          mkdir -p release_dist/
+          find release_assets/ -type f \( \
+            -name "launcher*" -o \
+            -name "*.exe" -o \
+            -name "*.zip" -o \
+            -name "*.tar.gz" -o \
+            -name "*.tar.zst" -o \
+            -name "manifest.json" \
+          \) -exec cp {} release_dist/ \;
+          echo "📦 准备挂载到 GitHub Release 的清单:"
+          ls -lh release_dist/
 
       - name: Create Public GitHub Release
         uses: softprops/action-gh-release@v2
@@ -590,19 +615,107 @@ jobs:
           body: |
             ## 📦 Release ${{ needs.precheck.outputs.release_tag }}
 
-            ### 🚀 安装包下载
+            ### 🚀 客户端 / 启动器下载
 
-            | 平台 | 文件名 | 加速支持 |
-            |------|--------|----------|
-            | 🍏 macOS (ARM64 / Apple Silicon) | `*-macos-arm64.tar.gz` | Apple Metal 原生 GPU 加速 |
-            | 🪟 Windows (x86_64) | `*-windows-x86_64.zip` | CUDA 12.x + Vulkan |
-            | 🐧 Linux (x86_64, glibc 2.31+) | `*-linux-x86_64.tar.gz` | CUDA 12.x + Vulkan |
+            | 平台 | 极速启动器 (推荐) | 加速支持 |
+            |------|-------------------|----------|
+            | Windows (x86_64) | `launcher-windows-x64.exe` | CUDA 12.x + Vulkan |
+            | Linux (x86_64, glibc 2.31+) | `launcher-linux-x64` | CUDA 12.x + Vulkan |
+            | macOS (ARM64 / Apple Silicon) | `launcher-macos-arm64` | Apple Metal 原生 GPU 加速 |
 
-            ### 💡 运行要求
-            - **macOS**: macOS 12.0+ (Apple Silicon M1/M2/M3/M4 系列)，已内置原生 Metal 加速。
+            ### 💡 运行与更新说明
+            - **启动器模式**: 下载对应平台的 `launcher` 直接运行，将全自动从云端极速拉取并同步最新组件和依赖。
             - **CUDA 模式**: NVIDIA 驱动 ≥ 525（推荐 550+），免安装 CUDA Toolkit。
             - **Vulkan 模式**: 支持 Vulkan 1.2+ 的主流显卡（NVIDIA / AMD / Intel Arc / 核显）。
-          files: |
-            dist/**/*.tar.gz
-            dist/**/*.zip
-            dist/**/manifest.json
+          files: release_dist/*
+
+      - name: Auto-Sync to Hugging Face & ModelScope (Datasets Multi-Version Isolation)
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN || secrets.MODELSCOPE_API_TOKEN }}
+          HF_REPO: "vtswcbyy/vflow"
+          MS_REPO: "vtswcbyy/vflow"
+          RELEASE_TAG: ${{ needs.precheck.outputs.release_tag }}
+        run: |
+          if [ -z "$HF_TOKEN" ] && [ -z "$MODELSCOPE_TOKEN" ]; then
+            echo "ℹ️  未配置 HF_TOKEN 或 MODELSCOPE_TOKEN，跳过云端 Datasets 同步。"
+            exit 0
+          fi
+
+          echo "================================================================================"
+          echo "🚀 [云端自动分发] 启动 Hugging Face & ModelScope 目录级版本隔离并发同步..."
+          echo "📌 目标数据集仓库: $MS_REPO (魔塔) & $HF_REPO (Hugging Face)"
+          echo "📌 本次发布版本目录: latest/ 与 ${RELEASE_TAG}/"
+          echo "--------------------------------------------------------------------------------"
+
+          # 安装 git-lfs
+          type -p git-lfs >/dev/null || (sudo apt-get update && sudo apt-get install -y git-lfs) || true
+
+          SYNC_DIR="tmp_cloud_sync_repo"
+          mkdir -p "$SYNC_DIR"
+          cd "$SYNC_DIR"
+
+          git init -b main
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git lfs install --local
+          git lfs track "*.tar.zst" "*.exe" "*.bin" "*.onnx" "*.gguf" "*.safetensors" "*.dll"
+          git config lfs.concurrenttransfers 8
+
+          echo "📋 正在组织目录级多版本隔离结构..."
+          mkdir -p latest "$RELEASE_TAG"
+
+          # 填充 latest 目录 (供客户端默认请求)
+          cp -r ../dist/latest/* latest/ 2>/dev/null || true
+
+          # 填充专属版本目录 (永久快照保留，永不覆盖)
+          cp -r ../dist/latest/* "$RELEASE_TAG"/ 2>/dev/null || true
+
+          echo ".git_release" > .gitignore
+          git add .gitattributes .gitignore
+          git add latest/ "$RELEASE_TAG"/
+
+          if git diff --staged --quiet; then
+            echo "✨ 检查完毕: 云端分发文件与构建产物完全一致，无新增变更。"
+          else
+            git commit -m "Release ${RELEASE_TAG} - $(date '+%Y-%m-%d %H:%M:%S')" || true
+          fi
+          git tag -f "$RELEASE_TAG" 2>/dev/null || true
+
+          PIDS=()
+          NAMES=()
+
+          if [ -n "$HF_TOKEN" ]; then
+            echo "☁️  [Hugging Face] 配置远程目标: https://huggingface.co/datasets/${HF_REPO}"
+            git remote add origin-hf "https://user:${HF_TOKEN}@huggingface.co/datasets/${HF_REPO}"
+            echo "🚀 [Hugging Face] 后台并发推送中..."
+            git push -u origin-hf main --force &
+            PIDS+=($!)
+            NAMES+=("Hugging Face")
+          fi
+
+          if [ -n "$MODELSCOPE_TOKEN" ]; then
+            echo "☁️  [ModelScope 魔塔] 配置远程目标: https://www.modelscope.cn/datasets/${MS_REPO}.git"
+            git remote add origin-ms "https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/datasets/${MS_REPO}.git"
+            echo "🚀 [ModelScope 魔塔] 后台并发推送中..."
+            git push -u origin-ms main --force &
+            PIDS+=($!)
+            NAMES+=("ModelScope 魔塔")
+          fi
+
+          FAIL_COUNT=0
+          for i in "${!PIDS[@]}"; do
+            pid="${PIDS[$i]}"
+            name="${NAMES[$i]}"
+            if wait "$pid"; then
+              echo "✅ [$name] 同步成功！"
+            else
+              echo "⚠️  [$name] 推送遇到问题，请检查 Token 写入权限。"
+              FAIL_COUNT=$((FAIL_COUNT + 1))
+            fi
+          done
+
+          echo "================================================================================"
+          echo "🎉 云端 Datasets 同步执行完毕 (失败数: $FAIL_COUNT)"
+          echo "================================================================================"
