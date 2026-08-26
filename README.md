@@ -1,4 +1,4 @@
-﻿# VFlow AI — 本地多角色 AI 短视频一键成片工具
+# VFlow AI — 本地多角色 AI 短视频一键成片工具
 
 <p align="center">
   <img src="https://img.shields.io/badge/平台支持-Windows%20%7C%20Mac%20%7C%20Linux-blue?style=flat-square" alt="Platform">
@@ -46,9 +46,9 @@
 
 ---
 
-## 🖥️ 我的电脑能跑吗？（硬件显存建议）
+## 🖥️ 我的电脑能跑吗？
 
-不用看复杂的参数，对照你的显卡显存对号入座即可：
+### 1. 显卡显存建议（影响生图与渲染速度）
 
 | 硬件类型 | 显存 / 内存要求 | 运行效果 |
 | :--- | :--- | :--- |
@@ -56,7 +56,18 @@
 | **AMD 显卡 / Intel 显卡** | **建议 8GB 显存及以上** | 支持 Vulkan 通用加速，稳定运行 |
 | **苹果 Mac 电脑** | **建议 16GB 统一内存及以上**<br>*(最低 8GB 也能跑)* | M 系列芯片原生优化，发热低运行流畅 |
 
-*电脑内存建议 16GB 或以上，体验更佳。*
+*电脑系统内存建议 16GB 或以上，体验更佳。*
+
+---
+
+### 2. 支持的操作系统与最低版本
+
+- **Windows**：Windows 10 (20H2 或更高版本) / Windows 11（64位），支持常见台式机与笔记本。
+- **苹果 Mac**：macOS 12.0 (Monterey) 或更高版本，需搭载 M1 / M2 / M3 / M4 系列芯片。
+- **Linux**（主流 64位发行版，底层要求 glibc ≥ 2.31）：
+  - **Ubuntu / Debian 系**：Ubuntu 20.04+、Debian 11+、Linux Mint 20+、Deepin (深度) / UOS (统信)；
+  - **RHEL / Fedora 系**：Fedora 33+、Rocky Linux 9+、AlmaLinux 9+、CentOS Stream 9+；
+  - **Arch 系 / openSUSE**：Arch Linux、Manjaro 等主流滚动发行版。
 
 ---
 
