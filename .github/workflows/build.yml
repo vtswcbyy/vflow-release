@@ -1,4 +1,4 @@
-﻿name: Build & Release App
+name: Build & Release App
 
 # ────────────────────────────────────────────────────────────
 #  触发条件:
@@ -87,22 +87,73 @@ jobs:
             DO_RELEASE="true"
           fi
           
-          # 2. 检查公开仓库是否已存在同名 Release
+          # 2. 检查公开仓库中是否已存在同平台的 Release 资产
           if [ "$DO_RELEASE" = "true" ]; then
+            PLATFORM="${{ github.event.client_payload.platform || inputs.platform || 'all' }}"
+            echo "🎯 目标构建平台: $PLATFORM"
             echo "🔍 正在检查公开仓库是否已有已发布的同名 Release: $TAG ..."
+            
             if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-              echo "================================================================================"
-              echo "❌ ❌ ❌ [构建熔断拦截: 版本号已存在] ❌ ❌ ❌"
-              echo "--------------------------------------------------------------------------------"
-              echo "⚠️  公开仓库 ${{ github.repository }} 中已存在同名 Release: $TAG ！"
-              echo "💡 常见原因: 忘记在本地 Cargo.toml 中递增版本号 (当前仍为 $TAG)"
-              echo "👉 解决方法:"
-              echo "   1. 请在本地修改 Cargo.toml 中的 version (例如升级到新版本)，提交推送后重新构建；"
-              echo "   2. 或者在 Run workflow 触发弹窗中手动填写一个不同的 release_tag。"
-              echo "================================================================================"
-              exit 1
+              echo "ℹ️  公开仓库中已存在 Release: $TAG，正在校验已发布的平台资产..."
+              EXISTING_ASSETS=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' 2>/dev/null || true)
+              echo "📦 当前已存在的资产列表:"
+              if [ -n "$EXISTING_ASSETS" ]; then
+                echo "$EXISTING_ASSETS" | sed 's/^/   - /'
+              else
+                echo "   (暂无文件资产)"
+              fi
+              
+              WIN_MATCHES=$(echo "$EXISTING_ASSETS" | grep -iE "windows|win-x86|win64" || true)
+              LINUX_MATCHES=$(echo "$EXISTING_ASSETS" | grep -iE "linux" || true)
+              MAC_MATCHES=$(echo "$EXISTING_ASSETS" | grep -iE "macos|darwin|apple|arm64" || true)
+              
+              CONFLICT_FOUND=0
+              CONFLICT_MSG=""
+              
+              if [ "$PLATFORM" = "windows" ]; then
+                if [ -n "$WIN_MATCHES" ]; then
+                  CONFLICT_FOUND=1
+                  CONFLICT_MSG="Windows 平台资产已存在 ($(echo $WIN_MATCHES | tr '\n' ' '))"
+                fi
+              elif [ "$PLATFORM" = "linux" ]; then
+                if [ -n "$LINUX_MATCHES" ]; then
+                  CONFLICT_FOUND=1
+                  CONFLICT_MSG="Linux 平台资产已存在 ($(echo $LINUX_MATCHES | tr '\n' ' '))"
+                fi
+              elif [ "$PLATFORM" = "macos" ]; then
+                if [ -n "$MAC_MATCHES" ]; then
+                  CONFLICT_FOUND=1
+                  CONFLICT_MSG="macOS 平台资产已存在 ($(echo $MAC_MATCHES | tr '\n' ' '))"
+                fi
+              elif [ "$PLATFORM" = "all" ]; then
+                CONFLICT_LIST=""
+                [ -n "$WIN_MATCHES" ] && CONFLICT_LIST="${CONFLICT_LIST}Windows ($(echo $WIN_MATCHES | tr '\n' ' ')) "
+                [ -n "$LINUX_MATCHES" ] && CONFLICT_LIST="${CONFLICT_LIST}Linux ($(echo $LINUX_MATCHES | tr '\n' ' ')) "
+                [ -n "$MAC_MATCHES" ] && CONFLICT_LIST="${CONFLICT_LIST}macOS ($(echo $MAC_MATCHES | tr '\n' ' ')) "
+                if [ -n "$CONFLICT_LIST" ]; then
+                  CONFLICT_FOUND=1
+                  CONFLICT_MSG="全平台构建 (all) 模式下检测到已有平台资产: ${CONFLICT_LIST}"
+                fi
+              fi
+              
+              if [ "$CONFLICT_FOUND" -eq 1 ]; then
+                echo "================================================================================"
+                echo "❌ ❌ ❌ [构建熔断拦截: 该平台产物已存在] ❌ ❌ ❌"
+                echo "--------------------------------------------------------------------------------"
+                echo "⚠️  公开仓库 ${{ github.repository }} 的 Release $TAG 中已存在当前平台的构建产物！"
+                echo "📌 冲突详情: $CONFLICT_MSG"
+                echo "💡 规则: 同一个平台不允许重复覆盖已有版本的构建产物。"
+                echo "👉 解决方法:"
+                echo "   1. 如需发布新版本，请在本地修改 Cargo.toml 中的 version (递增版本号) 并推送；"
+                echo "   2. 若为多平台分批构建，请在触发弹窗的 platform 选项中选择尚未构建的具体平台 (如 windows / linux / macos)；"
+                echo "   3. 或者在 Run workflow 触发弹窗中手动填写一个不同的 release_tag。"
+                echo "================================================================================"
+                exit 1
+              fi
+              echo "✅ 平台资产校验通过: Release $TAG 虽已存在，但目标平台 ($PLATFORM) 尚无重复产物，允许增量构建并发布！"
+            else
+              echo "✅ Release $TAG 尚不存在，无重复历史 Release，允许新建发布！"
             fi
-            echo "✅ 版本号 $TAG 校验通过，无重复历史 Release，允许开始编译！"
           fi
           
           echo "release_tag=$TAG" >> $GITHUB_OUTPUT
