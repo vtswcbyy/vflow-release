@@ -279,13 +279,12 @@ jobs:
         with:
           name: windows-release
           path: |
-            dist/latest/launcher*.exe
+            dist/latest/launcher*.zip
             dist/latest/manifest.json
             dist/latest/packages/
             dist/**/*.zip
             dist/**/*.tar.gz
             dist/**/*.tar.zst
-            dist/**/*.exe
             *-windows-x86_64.zip
           if-no-files-found: warn
           retention-days: 7
@@ -586,38 +585,27 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist/latest/packages/
-          # 规范提取 manifest.json 与各平台启动器至 dist/latest/ 根目录
+          # 规范提取 manifest.json 与各平台启动器压缩包至 dist/latest/ 根目录
           find release_assets/ -type f -name "manifest.json" -exec cp -f {} dist/latest/ \;
-          find release_assets/ -type f \( -name "launcher*" -o -name "*.exe" \) -exec cp -f {} dist/latest/ \;
+          find release_assets/ -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.zst" \) -exec cp -f {} dist/latest/ \;
 
           # 规范合并所有平台的 packages 子包
           for pdir in $(find release_assets/ -type d -name "packages"); do
             cp -rf "$pdir/"* dist/latest/packages/ 2>/dev/null || true
           done
 
-          # 准备 GitHub Release 极简分发文件清单 (每个压缩包自带启动器与预置清单 manifest.json)
+          # 准备 GitHub Release 极简分发文件清单 (全部为压缩包，彻底杜绝裸 .exe 导致下载误报拦截)
           mkdir -p release_dist/
 
-          # 1. Windows: 打包为 launcher-windows-x64.zip (包含 launcher-windows-x64.exe 与 manifest.json)
-          if [ -f dist/latest/launcher-windows-x64.exe ]; then
-            zip -j release_dist/launcher-windows-x64.zip dist/latest/launcher-windows-x64.exe dist/latest/manifest.json 2>/dev/null || true
-            cp -f dist/latest/launcher-windows-x64.exe release_dist/
-          fi
+          # 收集所有已打包完成的启动器压缩包及 manifest.json
+          find release_assets/ -type f \( \
+            -name "*.zip" -o \
+            -name "*.tar.gz" -o \
+            -name "*.tar.zst" -o \
+            -name "manifest.json" \
+          \) -exec cp -f {} release_dist/ \;
 
-          # 2. Linux: 打包为 launcher-cli-linux-x64.tar.gz (更名为 launcher-cli，附带 manifest.json)
-          if [ -f dist/latest/launcher-linux-x64 ]; then
-            chmod +x dist/latest/launcher-linux-x64
-            cp -f dist/latest/launcher-linux-x64 dist/latest/launcher-cli
-            tar -czf release_dist/launcher-cli-linux-x64.tar.gz -C dist/latest launcher-cli manifest.json
-          fi
-
-          # 3. macOS: 打包为 launcher-macos-arm64.tar.gz (附带 manifest.json)
-          if [ -f dist/latest/launcher-macos-arm64 ]; then
-            chmod +x dist/latest/launcher-macos-arm64
-            tar -czf release_dist/launcher-macos-arm64.tar.gz -C dist/latest launcher-macos-arm64 manifest.json
-          fi
-
-          echo "📦 准备挂载到 GitHub Release 的极简清单 (仅包含各平台一键启动包):"
+          echo "📦 准备挂载到 GitHub Release 的极简清单 (仅包含各平台一键启动包与分发清单):"
           ls -lh release_dist/
 
       - name: Create Public GitHub Release
@@ -630,13 +618,13 @@ jobs:
           body: |
             ## 📦 Release ${{ needs.precheck.outputs.release_tag }}
 
-            ### 🚀 客户端 / 启动器下载
+            ### 🚀 客户端 / 极速启动器下载
 
-            | 平台 | 极速启动包 (推荐) | 加速支持 |
+            | 平台 | 极速启动器压缩包 (解压即用) | 加速支持 |
             |------|-------------------|----------|
-            | Windows (x86_64) | `launcher-windows-x64.zip` (或 `.exe`) | CUDA 12.x + Vulkan |
-            | Linux (x86_64, glibc 2.31+) | `launcher-cli-linux-x64.tar.gz` | CUDA 12.x + Vulkan |
-            | macOS (ARM64 / Apple Silicon) | `launcher-macos-arm64.tar.gz` | Apple Metal 原生 GPU 加速 |
+            | 🪟 Windows (x86_64) | `launcher-windows-x64.zip` | CUDA 12.x + Vulkan |
+            | 🐧 Linux (x86_64, glibc 2.31+) | `launcher-cli-linux-x64.tar.gz` | CUDA 12.x + Vulkan |
+            | 🍏 macOS (ARM64 / Apple Silicon) | `launcher-macos-arm64.tar.gz` | Apple Metal 原生 GPU 加速 |
 
             ### 💡 运行与更新说明
             - **启动器模式**: 下载对应平台的压缩包解压后直接运行，将全自动从云端（魔塔/HF高速节点）极速拉取并同步最新组件、动态库和模型。
