@@ -38,9 +38,9 @@
 
 | 操作系统 | 适合机型与系统要求 | 加速类型 | 下载文件名 |
 | :--- | :--- | :--- | :--- |
-| 🪟 **Windows** | Win 10 20H2+ / Win 11 (64位) | 支持 N卡 CUDA 加速 + 通用显卡加速 | `launcher-windows-x64.zip` |
-| 🍏 **苹果Mac** | 搭载 M1 / M2 / M3 / M4 芯片的 Mac<br>(macOS 12.0+) | 原生 Apple Metal 芯片加速 | `launcher-macos-arm64.tar.gz` |
-| 🐧 **Linux** | Ubuntu 20.04+ / Debian 11+ / CentOS 9+ 等<br>(64位, glibc ≥ 2.31) | 支持 N卡 CUDA 加速 + 通用显卡加速 | `launcher-cli-linux-x64.tar.gz` |
+| **Windows** | Windows (64位)<br>Win 10 20H2+ / Win 11 | 支持 N卡 CUDA 加速 + 通用显卡加速 | `launcher-windows-x64.zip` |
+| **macOS** | macOS (ARM64, macOS 12.0+)<br>M1 / M2 / M3 / M4 系列芯片 | 原生 Apple Metal 芯片加速 | `launcher-macos-arm64.tar.gz` |
+| **Linux** | Linux (64位, glibc ≥ 2.31)<br>Ubuntu 20.04+ / Debian 11+ / CentOS 9+ 等 | 支持 N卡 CUDA 加速 + 通用显卡加速 | `launcher-cli-linux-x64.tar.gz` |
 
 > 💡 **下载小提示**：国内访问 GitHub 如遇下载较慢，可配合使用下载工具或网络加速。后续版本将同步上线 Hugging Face 与 魔搭 (ModelScope) 高速国内下载镜像。
 
