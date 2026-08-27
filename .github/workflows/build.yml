@@ -620,16 +620,15 @@ jobs:
 
             ### 🚀 客户端 / 极速启动器下载
 
-            | 平台 | 极速启动器压缩包 (解压即用) | 加速支持 |
-            |------|-------------------|----------|
-            | 🪟 Windows (x86_64) | `launcher-windows-x64.zip` | CUDA 12.x + Vulkan |
-            | 🐧 Linux (x86_64, glibc 2.31+) | `launcher-cli-linux-x64.tar.gz` | CUDA 12.x + Vulkan |
-            | 🍏 macOS (ARM64 / Apple Silicon) | `launcher-macos-arm64.tar.gz` | Apple Metal 原生 GPU 加速 |
+            | 操作系统与机型支持 | 极速启动包 (解压即用) | 硬件加速与显存建议 |
+            | :--- | :--- | :--- |
+            | 🪟 **Windows** (Win 10 20H2+ / Win 11, 64位) | `launcher-windows-x64.zip` | • **N 卡**: CUDA 极速加速 (驱动 ≥ 525，建议显存 ≥ 6GB)<br>• **A 卡 / Intel**: 通用显卡加速 (建议显存 ≥ 8GB) |
+            | 🐧 **Linux** (Ubuntu / Debian / CentOS / Fedora / Arch 等 64位, glibc ≥ 2.31) | `launcher-cli-linux-x64.tar.gz` | • **N 卡**: CUDA 极速加速 (驱动 ≥ 525，建议显存 ≥ 6GB)<br>• **A 卡 / Intel**: 通用显卡加速 (建议显存 ≥ 8GB) |
+            | 🍏 **macOS** (macOS 12.0+, M1/M2/M3/M4 系列芯片) | `launcher-macos-arm64.tar.gz` | • **Apple Silicon**: Metal 原生 GPU 加速 (建议内存 ≥ 16GB) |
 
-            ### 💡 运行与更新说明
-            - **启动器模式**: 下载对应平台的压缩包解压后直接运行，将全自动从云端（魔塔/HF高速节点）极速拉取并同步最新组件、动态库和模型。
-            - **CUDA 模式**: NVIDIA 驱动 ≥ 525（推荐 550+），免安装 CUDA Toolkit。
-            - **Vulkan 模式**: 支持 Vulkan 1.2+ 的主流显卡（NVIDIA / AMD / Intel Arc / 核显）。
+            ### 💡 极速上手说明
+            - **一键运行**: 解压后直接运行 `launcher`，将全自动从国内高速节点（魔塔/HF）极速拉取并同步最新组件与模型。
+            - **更多帮助**: 详细功能介绍、配置调优与常见问题请查阅 [项目首页 README.md](https://github.com/vtswcbyy/vflow-release#readme)。
           files: release_dist/*
 
       - name: Auto-Sync to Hugging Face & ModelScope (Datasets Multi-Version Isolation)

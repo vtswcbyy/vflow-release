@@ -38,9 +38,9 @@
 
 | 操作系统 | 适合机型 | 加速类型 | 下载文件名 |
 | :--- | :--- | :--- | :--- |
-| **Windows** | 常见台式机 / 笔记本 (64位) | 支持 N卡 CUDA 加速 + 通用显卡加速 | `vflow-v*-windows-x86_64.zip` |
-| **苹果Mac** | 搭载 M1 / M2 / M3 / M4 芯片的 Mac | 原生 Apple Metal 芯片加速 | `vflow-v*-macos-arm64.tar.gz` |
-| **Linux** | Ubuntu / Debian 等主流 64位系统 | CUDA + Vulkan 硬件加速 | `vflow-v*-linux-x86_64.tar.gz` |
+| **Windows** | Win 10 20H2+ / Win 11 (64位) | 支持 N卡 CUDA 加速 + 通用显卡加速 | `launcher-windows-x64.zip` |
+| **苹果Mac** | 搭载 M1 / M2 / M3 / M4 芯片的 Mac | 原生 Apple Metal 芯片加速 | `launcher-macos-arm64.tar.gz` |
+| **Linux** | Ubuntu / Debian / CentOS / Fedora / Arch 等 | 支持 N卡 CUDA 加速 + 通用显卡加速 | `launcher-cli-linux-x64.tar.gz` |
 
 > 💡 **下载小提示**：国内访问 GitHub 如遇下载较慢，可配合使用下载工具或网络加速。后续版本将同步上线 Hugging Face 与 魔搭 (ModelScope) 高速国内下载镜像。
 
@@ -53,7 +53,7 @@
 | 硬件类型 | 显存 / 内存要求 | 运行效果 |
 | :--- | :--- | :--- |
 | **英伟达独立显卡 (N 卡)** | **建议 6GB 显存及以上**<br>*(最低 4GB 也能跑)* | 速度最快，AI 生图与声音合成秒级出结果 |
-| **AMD 显卡 / Intel 显卡** | **建议 8GB 显存及以上** | 支持 Vulkan 通用加速，稳定运行 |
+| **AMD 显卡 / Intel 显卡** | **建议 8GB 显存及以上** | 支持通用显卡硬件加速，稳定运行 |
 | **苹果 Mac 电脑** | **建议 16GB 统一内存及以上**<br>*(最低 8GB 也能跑)* | M 系列芯片原生优化，发热低运行流畅 |
 
 *电脑系统内存建议 16GB 或以上，体验更佳。*
@@ -76,10 +76,10 @@
 1. **下载解压**：
    - 下载压缩包后，解压到任意文件夹（**建议解压路径不要带中文或空格**，例如解压到 `D:\vflow`）。
 2. **双击启动**：
-   - **Windows**：双击文件夹里的 `vflow.exe` 或 `launcher.exe`。
-   - **Mac / Linux**：终端执行 `chmod +x ./vflow && ./vflow` 启动。
+   - **Windows**：双击运行解压得到的 `launcher-windows-x64.exe`。
+   - **Mac / Linux**：终端执行 `chmod +x ./launcher* && ./launcher*` 启动。
 3. **开始制作**：
-   - 启动后会自动在浏览器打开操作界面，在设置里填入你的大模型 API Key（如 DeepSeek），即可开始一键做视频！
+   - 首次启动会自动从云端拉取必要组件与模型；完成后自动在浏览器打开操作界面，在设置里填入你的大模型 API Key（如 DeepSeek），即可开始一键做视频！
 
 ---
 
