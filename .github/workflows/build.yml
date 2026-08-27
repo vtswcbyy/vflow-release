@@ -598,12 +598,14 @@ jobs:
             cp -rf "$pdir/"* dist/latest/packages/ 2>/dev/null || true
           done
 
-          # 4. 准备 GitHub Release 极简清单 (仅包含启动器压缩包与 manifest.json)
+          # 4. 准备 GitHub Release 极简清单 (严格仅包含三大主流平台推荐启动包)
           mkdir -p release_dist/
-          cp -f dist/latest/launcher*.zip dist/latest/launcher*.tar.gz dist/latest/manifest.json release_dist/ 2>/dev/null || true
+          cp -f dist/latest/launcher-windows-x64.zip release_dist/ 2>/dev/null || true
+          cp -f dist/latest/launcher-cli-linux-x64.tar.gz release_dist/ 2>/dev/null || true
+          cp -f dist/latest/launcher-macos-arm64.tar.gz release_dist/ 2>/dev/null || true
 
           echo "================================================================================"
-          echo "📦 [GitHub Release 极简附件清单 (仅启动器与 manifest)]:"
+          echo "📦 [GitHub Release 极简附件清单 (仅三大平台启动器)]:"
           ls -lh release_dist/
           echo "--------------------------------------------------------------------------------"
           echo "📁 [dist/latest 完整分发目录结构 (同步至 HF / 魔塔)]:"
@@ -624,9 +626,9 @@ jobs:
 
             | 操作系统与机型支持 | 极速启动包 (解压即用) | 硬件加速与显存建议 |
             | :--- | :--- | :--- |
-            | 🪟 **Windows** (Win 10 20H2+ / Win 11, 64位) | `launcher-windows-x64.zip` | • **N 卡**: CUDA 极速加速 (驱动 ≥ 525，建议显存 ≥ 6GB)<br>• **A 卡 / Intel**: 通用显卡加速 (建议显存 ≥ 8GB) |
-            | 🐧 **Linux** (Ubuntu 20.04+ / Debian 11+ / CentOS 9+ / Fedora 33+ / Arch 等 64位, glibc ≥ 2.31) | `launcher-cli-linux-x64.tar.gz` | • **N 卡**: CUDA 极速加速 (驱动 ≥ 525，建议显存 ≥ 6GB)<br>• **A 卡 / Intel**: 通用显卡加速 (建议显存 ≥ 8GB) |
-            | 🍏 **macOS** (macOS 12.0+, M1/M2/M3/M4 系列芯片) | `launcher-macos-arm64.tar.gz` | • **Apple Silicon**: Metal 原生 GPU 加速 (建议内存 ≥ 16GB) |
+            | 🪟 **Windows**<br>(Win 10 20H2+ / Win 11, 64位) | `launcher-windows-x64.zip` | • **N 卡**: CUDA 极速加速 (驱动 ≥ 525，建议显存 ≥ 6GB)<br>• **A 卡 / Intel**: 通用显卡加速 (建议显存 ≥ 8GB) |
+            | 🐧 **Linux** (64位, glibc ≥ 2.31)<br>Ubuntu 20.04+ / Debian 11+ / CentOS 9+ 等 | `launcher-cli-linux-x64.tar.gz` | • **N 卡**: CUDA 极速加速 (驱动 ≥ 525，建议显存 ≥ 6GB)<br>• **A 卡 / Intel**: 通用显卡加速 (建议显存 ≥ 8GB) |
+            | 🍏 **macOS**<br>(macOS 12.0+, M1/M2/M3/M4 系列芯片) | `launcher-macos-arm64.tar.gz` | • **Apple Silicon**: Metal 原生 GPU 加速 (建议内存 ≥ 16GB) |
 
             ### 💡 极速上手说明
             - **一键运行**: 解压后直接运行 `launcher`，将全自动从国内高速节点（魔塔/HF）极速拉取并同步最新组件与模型。
