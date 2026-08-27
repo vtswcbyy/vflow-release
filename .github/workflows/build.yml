@@ -646,94 +646,113 @@ jobs:
           fi
 
           echo "================================================================================"
-          echo "🚀 [云端自动分发] 启动 Hugging Face & ModelScope 目录级版本隔离并发同步..."
+          echo "🚀 [云端自动分发] 启动 Hugging Face & ModelScope 官方 SDK 高速并发同步..."
           echo "📌 目标数据集仓库: $MS_REPO (魔塔) & $HF_REPO (Hugging Face)"
           echo "📌 本次发布版本目录: latest/ 与 ${RELEASE_TAG}/"
           echo "--------------------------------------------------------------------------------"
 
-          # 安装 git-lfs
-          type -p git-lfs >/dev/null || (sudo apt-get update && sudo apt-get install -y git-lfs) || true
+          # 安装官方发布 SDK 工具
+          pip install --upgrade huggingface_hub modelscope --quiet
 
-          SYNC_DIR="tmp_cloud_sync_repo"
-          mkdir -p "$SYNC_DIR"
-          cd "$SYNC_DIR"
+          # 执行 Python 自动发布同步脚本
+          python - << 'EOF'
+          import os
+          import sys
+          from pathlib import Path
 
-          # 优先浅克隆拉取远端已有的历史版本目录 (例如已存在的 v0.1.0/ 等)，实现多版本共存
-          CLONED=0
-          if [ -n "$HF_TOKEN" ]; then
-            git clone --depth 1 "https://user:${HF_TOKEN}@huggingface.co/datasets/${HF_REPO}" . 2>/dev/null && CLONED=1 || true
-          fi
-          if [ "$CLONED" -eq 0 ] && [ -n "$MODELSCOPE_TOKEN" ]; then
-            git clone --depth 1 "https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/datasets/${MS_REPO}.git" . 2>/dev/null && CLONED=1 || true
-          fi
+          release_tag = os.environ.get("RELEASE_TAG", "v0.1.0")
+          hf_token = os.environ.get("HF_TOKEN")
+          ms_token = os.environ.get("MODELSCOPE_TOKEN")
+          hf_repo = os.environ.get("HF_REPO", "vtswcbyy/vflow")
+          ms_repo = os.environ.get("MS_REPO", "vtswcbyy/vflow")
+          dist_dir = Path("dist/latest")
 
-          if [ ! -d ".git" ]; then
-            git init -b main
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-          fi
+          if not dist_dir.exists():
+              print(f"❌ 目录 {dist_dir} 不存在，跳过同步。")
+              sys.exit(1)
 
-          git lfs install --local
-          # 关键：追踪所有二进制文件（包含无后缀的 Linux/macOS launcher）
-          git lfs track "launcher*" "*.exe" "*.tar.zst" "*.bin" "*.onnx" "*.gguf" "*.safetensors" "*.dll" "*.dylib" "*.so*"
-          git config lfs.concurrenttransfers 8
+          has_error = False
 
-          echo "📋 正在组织目录级多版本隔离结构..."
-          mkdir -p latest "$RELEASE_TAG"
+          # ── 1. Hugging Face Datasets 同步 ─────────────────────────────────────
+          if hf_token:
+              print(f"☁️  [Hugging Face] 开始同步至数据集: https://huggingface.co/datasets/{hf_repo}")
+              try:
+                  from huggingface_hub import HfApi
+                  api = HfApi(token=hf_token)
+                  
+                  # 确保存放数据集存在
+                  try:
+                      api.create_repo(repo_id=hf_repo, repo_type="dataset", exist_ok=True)
+                  except Exception as e:
+                      pass
 
-          # 刷新 latest 目录为本次构建最新文件
-          rm -rf latest/*
-          cp -r ../dist/latest/* latest/ 2>/dev/null || true
+                  print(f"📦 [Hugging Face] 正在上传同步至 'latest/' 目录...")
+                  api.upload_folder(
+                      folder_path=str(dist_dir),
+                      repo_id=hf_repo,
+                      repo_type="dataset",
+                      path_in_repo="latest",
+                      commit_message=f"Release {release_tag} - latest"
+                  )
 
-          # 写入本次专属版本目录 (永久快照保留，历史版本不受影响)
-          rm -rf "${RELEASE_TAG}"/*
-          cp -r ../dist/latest/* "$RELEASE_TAG"/ 2>/dev/null || true
+                  print(f"📦 [Hugging Face] 正在上传快照至 '{release_tag}/' 版本目录...")
+                  api.upload_folder(
+                      folder_path=str(dist_dir),
+                      repo_id=hf_repo,
+                      repo_type="dataset",
+                      path_in_repo=release_tag,
+                      commit_message=f"Release {release_tag}"
+                  )
+                  print("✅ [Hugging Face] 目录多版本同步全部完成！")
+              except Exception as e:
+                  print(f"❌ [Hugging Face] 同步失败: {e}")
+                  has_error = True
 
-          echo ".git_release" > .gitignore
-          git add .gitattributes .gitignore
-          git add latest/ "$RELEASE_TAG"/
+          # ── 2. ModelScope (魔塔) Datasets 同步 ──────────────────────────────────
+          if ms_token:
+              print(f"☁️  [ModelScope 魔塔] 开始同步至数据集: https://www.modelscope.cn/datasets/{ms_repo}")
+              try:
+                  from modelscope.hub.api import HubApi
+                  api = HubApi()
+                  api.login(ms_token)
 
-          if git diff --staged --quiet; then
-            echo "✨ 检查完毕: 云端分发文件与构建产物完全一致，无新增变更。"
-          else
-            git commit -m "Release ${RELEASE_TAG} - $(date '+%Y-%m-%d %H:%M:%S')" || true
-          fi
-          git tag -f "$RELEASE_TAG" 2>/dev/null || true
+                  # 确保魔塔数据集存在
+                  try:
+                      ns, ds_name = ms_repo.split("/", 1) if "/" in ms_repo else ("", ms_repo)
+                      api.create_dataset(dataset_name=ds_name, namespace=ns, visibility=1)
+                  except Exception as e:
+                      pass
 
-          PIDS=()
-          NAMES=()
+                  def upload_dir_to_modelscope(local_dir, target_prefix, commit_msg):
+                      for root, _, files in os.walk(local_dir):
+                          for file in files:
+                              local_file = Path(root) / file
+                              rel_path = local_file.relative_to(local_dir).as_posix()
+                              remote_path = f"{target_prefix}/{rel_path}".strip("/")
+                              print(f"   -> 上传: {remote_path} ({local_file.stat().st_size / 1024 / 1024:.2f} MB)")
+                              api.upload_file(
+                                  repo_id=ms_repo,
+                                  file_path=str(local_file),
+                                  path_in_repo=remote_path,
+                                  repo_type="dataset",
+                                  commit_message=commit_msg
+                              )
 
-          if [ -n "$HF_TOKEN" ]; then
-            echo "☁️  [Hugging Face] 配置远程目标: https://huggingface.co/datasets/${HF_REPO}"
-            git remote add origin-hf "https://user:${HF_TOKEN}@huggingface.co/datasets/${HF_REPO}"
-            echo "🚀 [Hugging Face] 后台并发推送 main 分支中..."
-            git push -u origin-hf main --force &
-            PIDS+=($!)
-            NAMES+=("Hugging Face")
-          fi
+                  print(f"📦 [ModelScope 魔塔] 正在上传同步至 'latest/' 目录...")
+                  upload_dir_to_modelscope(dist_dir, "latest", f"Release {release_tag} - latest")
 
-          if [ -n "$MODELSCOPE_TOKEN" ]; then
-            echo "☁️  [ModelScope 魔塔] 配置远程目标: https://www.modelscope.cn/datasets/${MS_REPO}.git"
-            git remote add origin-ms "https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/datasets/${MS_REPO}.git"
-            echo "🚀 [ModelScope 魔塔] 后台并发推送 master & main 分支中..."
-            # 魔塔默认分支为 master，同时推送 master 和 main 确保网页和 API 双端秒级可见
-            (git push -u origin-ms main:master --force && git push origin-ms main --force 2>/dev/null || true) &
-            PIDS+=($!)
-            NAMES+=("ModelScope 魔塔")
-          fi
+                  print(f"📦 [ModelScope 魔塔] 正在上传快照至 '{release_tag}/' 版本目录...")
+                  upload_dir_to_modelscope(dist_dir, release_tag, f"Release {release_tag}")
 
-          FAIL_COUNT=0
-          for i in "${!PIDS[@]}"; do
-            pid="${PIDS[$i]}"
-            name="${NAMES[$i]}"
-            if wait "$pid"; then
-              echo "✅ [$name] 同步成功！"
-            else
-              echo "⚠️  [$name] 推送遇到问题，请检查 Token 写入权限。"
-              FAIL_COUNT=$((FAIL_COUNT + 1))
-            fi
-          done
+                  print("✅ [ModelScope 魔塔] 目录多版本同步全部完成！")
+              except Exception as e:
+                  print(f"❌ [ModelScope 魔塔] 同步失败: {e}")
+                  has_error = True
+
+          if has_error:
+              print("⚠️ 部分平台同步遇到错误，请检查对应 Token 权限。")
+          EOF
 
           echo "================================================================================"
-          echo "🎉 云端 Datasets 同步执行完毕 (失败数: $FAIL_COUNT)"
+          echo "🎉 云端 Datasets 官方 SDK 同步步骤执行完毕"
           echo "================================================================================"
