@@ -387,6 +387,23 @@ jobs:
               rm -f "$f"
             fi
           done
+
+          # 自动补齐并规整 Linux 动态库标准软链接 (.so.0 / .so)
+          for d in sdcpp/ggml sdcpp/engines qwentts/ggml qwentts/engines; do
+            if [ -d "$d" ]; then
+              (
+                cd "$d"
+                for so_f in *.so.*.*.*; do
+                  [ -f "$so_f" ] || continue
+                  base_name=$(echo "$so_f" | sed -E 's/\.so\..*/.so/')
+                  major_name=$(echo "$so_f" | sed -E 's/(\.so\.[0-9]+)\..*/\1/')
+                  ln -sf "$so_f" "$major_name" 2>/dev/null || cp -f "$so_f" "$major_name"
+                  ln -sf "$so_f" "$base_name"  2>/dev/null || cp -f "$so_f" "$base_name"
+                done
+              )
+            fi
+          done
+
           cd - > /dev/null
 
           echo "✅ [Linux 预编译引擎就绪状态]:"
