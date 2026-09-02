@@ -615,14 +615,12 @@ jobs:
             cp -rf "$pdir/"* dist/latest/packages/ 2>/dev/null || true
           done
 
-          # 4. 准备 GitHub Release 极简清单 (严格仅包含三大主流平台推荐启动包)
+          # 4. 准备 GitHub Release 极简清单 (提取三大主流平台启动包，支持带或不带 -cli 前缀)
           mkdir -p release_dist/
-          cp -f dist/latest/launcher-windows-x64.zip release_dist/ 2>/dev/null || true
-          cp -f dist/latest/launcher-cli-linux-x64.tar.gz release_dist/ 2>/dev/null || true
-          cp -f dist/latest/launcher-macos-arm64.tar.gz release_dist/ 2>/dev/null || true
+          find dist/latest/ -maxdepth 1 -type f \( -name "launcher*.zip" -o -name "launcher*.tar.gz" \) -exec cp -f {} release_dist/ \;
 
           echo "================================================================================"
-          echo "📦 [GitHub Release 极简附件清单 (仅三大平台启动器)]:"
+          echo "📦 [GitHub Release 极简附件清单 (已发布全平台启动器)]:"
           ls -lh release_dist/
           echo "--------------------------------------------------------------------------------"
           echo "📁 [dist/latest 完整分发目录结构 (同步至 HF / 魔塔)]:"
@@ -643,12 +641,12 @@ jobs:
 
             | 操作系统与机型支持 | 极速启动包 (解压即用) | 硬件加速与显存建议 |
             | :--- | :--- | :--- |
-            | **Windows (64位)**<br>Win 10 20H2+ / Win 11 | `launcher-windows-x64.zip` | • **N 卡**: CUDA 极速加速 (驱动 ≥ 525，建议显存 ≥ 6GB)<br>• **A 卡 / Intel**: 通用显卡加速 (建议显存 ≥ 8GB) |
+            | **Windows (64位)**<br>Win 10 20H2+ / Win 11 | `launcher-cli-windows-x64.zip` | • **N 卡**: CUDA 极速加速 (驱动 ≥ 525，建议显存 ≥ 6GB)<br>• **A 卡 / Intel**: 通用显卡加速 (建议显存 ≥ 8GB) |
             | **Linux (64位, glibc ≥ 2.31)**<br>Ubuntu 20.04+ / Debian 11+ / CentOS 9+ 等 | `launcher-cli-linux-x64.tar.gz` | • **N 卡**: CUDA 极速加速 (驱动 ≥ 525，建议显存 ≥ 6GB)<br>• **A 卡 / Intel**: 通用显卡加速 (建议显存 ≥ 8GB) |
-            | **macOS (ARM64, macOS 12.0+)**<br>M1 / M2 / M3 / M4 系列芯片 | `launcher-macos-arm64.tar.gz` | • **Apple Silicon**: Metal 原生 GPU 加速 (建议内存 ≥ 16GB) |
+            | **macOS (ARM64, macOS 12.0+)**<br>M1 / M2 / M3 / M4 系列芯片 | `launcher-cli-macos-arm64.tar.gz` | • **Apple Silicon**: Metal 原生 GPU 加速 (建议内存 ≥ 16GB) |
 
             ### 💡 极速上手说明
-            - **一键运行**: 解压后直接运行 `launcher`，将全自动从国内高速节点（魔塔/HF）极速拉取并同步最新组件与模型。
+            - **一键运行**: 解压后直接运行 `launcher-cli` (Windows 双击 `run.bat`，Linux/macOS 运行 `./run.sh`)，将全自动从国内高速节点（魔塔/HF）极速拉取并同步最新组件与模型。
             - **更多帮助**: 详细功能介绍、配置调优与常见问题请查阅 [项目首页 README.md](https://github.com/vtswcbyy/vflow-release#readme)。
           files: release_dist/*
 
