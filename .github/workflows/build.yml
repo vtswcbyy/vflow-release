@@ -607,13 +607,63 @@ jobs:
           # 1. 提取各平台的启动器压缩包至 dist/latest/ 根目录 (精确匹配 launcher*，严禁将 packages 里的 .tar.zst 复制到根目录)
           find release_assets/ -maxdepth 4 -type f \( -name "launcher*.zip" -o -name "launcher*.tar.gz" \) -exec cp -f {} dist/latest/ \;
 
-          # 2. 提取 manifest.json 至 dist/latest/ 根目录
-          find release_assets/ -maxdepth 4 -type f -name "manifest.json" -exec cp -f {} dist/latest/ \;
-
-          # 3. 规范合并各平台的 packages 子包到 dist/latest/packages/
+          # 2. 规范合并各平台的 packages 子包到 dist/latest/packages/
           for pdir in $(find release_assets/ -type d -name "packages"); do
             cp -rf "$pdir/"* dist/latest/packages/ 2>/dev/null || true
           done
+
+          # 3. 智能聚合所有平台的 manifest.json，并以 dist/latest 下真实存在的物理文件重新校验校准哈希与大小，彻底杜绝多 Runner 并发覆写脱节！
+          python3 - << 'EOF'
+          import os, glob, json, hashlib
+
+          merged_packages = {}
+          merged_models = {}
+          version = "0.1.0"
+
+          # 收集所有平台 Runner 输出的清单配置
+          for m_path in sorted(glob.glob("release_assets/**/manifest.json", recursive=True)):
+              try:
+                  with open(m_path, "r", encoding="utf-8") as f:
+                      data = json.load(f)
+                      if data.get("version"):
+                          version = data["version"]
+                      for pkg in data.get("packages", []):
+                          merged_packages[pkg["name"]] = pkg
+                      for m in data.get("models", []):
+                          merged_models[m["name"]] = m
+              except Exception as e:
+                  print(f"⚠️ 读取清单失败 [{m_path}]: {e}")
+
+          # 终极真理核验：以当前 dist/latest/ 目录下真实存在的物理归档包重新计算 SHA-256 和真实大小
+          print("🔍 正在核实校准全平台分发包物理属性...")
+          for name, pkg in merged_packages.items():
+              rel_file = pkg.get("remote_file", "")
+              local_file = os.path.join("dist/latest", rel_file)
+              if os.path.exists(local_file):
+                  real_size = os.path.getsize(local_file)
+                  hasher = hashlib.sha256()
+                  with open(local_file, "rb") as f:
+                      while chunk := f.read(1024 * 1024):
+                          hasher.update(chunk)
+                  real_sha256 = hasher.hexdigest()
+
+                  if pkg.get("sha256") != real_sha256:
+                      print(f"  ⚡ 自动校准 [{name}] SHA256: {pkg.get('sha256')[:12]}... -> {real_sha256[:12]}...")
+                      pkg["sha256"] = real_sha256
+                  if pkg.get("size") != real_size:
+                      print(f"  ⚡ 自动校准 [{name}] 大小: {pkg.get('size')} -> {real_size} 字节")
+                      pkg["size"] = real_size
+
+          final_manifest = {
+              "version": version,
+              "packages": list(merged_packages.values()),
+              "models": list(merged_models.values()),
+          }
+
+          with open("dist/latest/manifest.json", "w", encoding="utf-8") as f:
+              json.dump(final_manifest, f, indent=2, ensure_ascii=False)
+          print("✅ [全平台 manifest.json 聚合与物理校准全部完成]")
+          EOF
 
           # 4. 准备 GitHub Release 极简清单 (提取三大主流平台启动包，支持带或不带 -cli 前缀)
           mkdir -p release_dist/
